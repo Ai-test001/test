@@ -6,6 +6,43 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# 檢查並釋放端口 80
+if ss -tulnp | grep ':80' > /dev/null; then
+  echo "端口 80 已被佔用，正在嘗試停止可能的 Nginx 服務..."
+  systemctl stop nginx > /dev/null 2>&1
+  systemctl disable nginx > /dev/null 2>&1
+  if ss -tulnp | grep ':80' > /dev/null; then
+    echo "錯誤：無法釋放端口 80，請手動檢查並終止佔用進程（例如：sudo ss -tulnp | grep :80）"
+    exit 1
+  fi
+fi
+
+# 檢查 APT 鎖
+APT_LOCK_TIMEOUT=60
+while [ -f /var/lib/apt/lists/lock ] || [ -f /var/cache/apt/archives/lock ] || [ -f /var/lib/dpkg/lock-frontend ]; do
+  echo "等待 APT 鎖釋放（最多 $APT_LOCK_TIMEOUT 秒）..."
+  sleep 5
+  APT_LOCK_TIMEOUT=$((APT_LOCK_TIMEOUT - 5))
+  if [ $APT_LOCK_TIMEOUT -le 0 ]; then
+    echo "錯誤：無法釋放 APT 鎖，請檢查是否有其他 APT 進程（例如：ps aux | grep apt）"
+    exit 1
+  fi
+done
+
+# 檢查 unattended-upgrades 是否正在運行
+if systemctl is-active --quiet unattended-upgrades; then
+  echo "unattended-upgrades 正在運行，等待最多 60 秒..."
+  UPGRADE_TIMEOUT=60
+  while systemctl is-active --quiet unattended-upgrades; do
+    sleep 5
+    UPGRADE_TIMEOUT=$((UPGRADE_TIMEOUT - 5))
+    if [ $UPGRADE_TIMEOUT -le 0 ]; then
+      echo "錯誤：unattended-upgrades 未完成，請手動檢查（sudo systemctl status unattended-upgrades）"
+      exit 1
+    fi
+  done
+fi
+
 # 檢測作業系統
 if [ -f /etc/os-release ]; then
   . /etc/os-release
