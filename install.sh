@@ -8,11 +8,23 @@ fi
 
 # 檢查並釋放端口 80
 if ss -tulnp | grep ':80' > /dev/null; then
-  echo "端口 80 已被佔用，正在嘗試停止可能的 Nginx 服務..."
+  echo "端口 80 已被佔用，嘗試終止相關進程..."
+  # 停止已知的 Web 伺服器
   systemctl stop nginx > /dev/null 2>&1
   systemctl disable nginx > /dev/null 2>&1
+  systemctl stop apache2 > /dev/null 2>&1
+  # 查找並終止佔用端口 80 的進程
+  PIDS=$(ss -tulnp | grep ':80' | awk '{print $NF}' | grep -o 'pid=[0-9]*' | cut -d'=' -f2 | sort -u)
+  if [ -n "$PIDS" ]; then
+    for pid in $PIDS; do
+      echo "終止進程 PID: $pid"
+      kill -9 $pid
+    done
+  fi
+  # 再次檢查端口
+  sleep 2
   if ss -tulnp | grep ':80' > /dev/null; then
-    echo "錯誤：無法釋放端口 80，請手動檢查並終止佔用進程（例如：sudo ss -tulnp | grep :80）"
+    echo "錯誤：無法釋放端口 80，請手動檢查（sudo ss -tulnp | grep :80）"
     exit 1
   fi
 fi
